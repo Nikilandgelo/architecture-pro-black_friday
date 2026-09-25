@@ -1,81 +1,35 @@
 import json
 import logging
-import os
 import time
-from typing import List, Optional
+from contextlib import asynccontextmanager
 
-import motor.motor_asyncio
-from bson import ObjectId
 from fastapi import Body, FastAPI, HTTPException, status
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
-from fastapi_cache.decorator import cache
 from logmiddleware import RouterLoggingMiddleware, logging_config
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from pydantic.functional_validators import BeforeValidator
 from pymongo import errors
 from redis import asyncio as aioredis
-from typing_extensions import Annotated
+
+from .models import UserModel, UserCollection
+from .mongo import get_shards_info
+from .settings import REDIS_URL, DATABASE_NAME, cache, client, db
 
 # Configure JSON logging
 logging.config.dictConfig(logging_config)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
-app.add_middleware(
-    RouterLoggingMiddleware,
-    logger=logger,
-)
 
-DATABASE_URL = os.environ["MONGODB_URL"]
-DATABASE_NAME = os.environ["MONGODB_DATABASE_NAME"]
-REDIS_URL = os.getenv("REDIS_URL", None)
-
-
-def nocache(*args, **kwargs):
-    def decorator(func):
-        return func
-
-    return decorator
-
-
-if REDIS_URL:
-    cache = cache
-else:
-    cache = nocache
-
-
-client = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URL)
-db = client[DATABASE_NAME]
-
-# Represents an ObjectId field in the database.
-# It will be represented as a `str` on the model so that it can be serialized to JSON.
-PyObjectId = Annotated[str, BeforeValidator(str)]
-
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     if REDIS_URL:
         redis = aioredis.from_url(REDIS_URL, encoding="utf8", decode_responses=True)
         FastAPICache.init(RedisBackend(redis), prefix="api:cache")
+    yield
+    pass
 
 
-class UserModel(BaseModel):
-    """
-    Container for a single user record.
-    """
-
-    id: Optional[PyObjectId] = Field(alias="_id", default=None)
-    age: int = Field(...)
-    name: str = Field(...)
-
-
-class UserCollection(BaseModel):
-    """
-    A container holding a list of `UserModel` instances.
-    """
-
-    users: List[UserModel]
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(RouterLoggingMiddleware, logger=logger)
 
 
 @app.get("/")
@@ -87,6 +41,7 @@ async def root():
         collections[collection_name] = {
             "documents_count": await collection.count_documents({})
         }
+
     try:
         replica_status = await client.admin.command("replSetGetStatus")
         replica_status = json.dumps(replica_status, indent=2, default=str)
@@ -97,13 +52,6 @@ async def root():
     read_preference = client.client_options.read_preference
     topology_type = topology_description.topology_type_name
     replicaset_name = topology_description.replica_set_name
-
-    shards = None
-    if topology_type == "Sharded":
-        shards_list = await client.admin.command("listShards")
-        shards = {}
-        for shard in shards_list.get("shards", {}):
-            shards[shard["_id"]] = shard["host"]
 
     cache_enabled = False
     if REDIS_URL:
@@ -120,7 +68,7 @@ async def root():
         "mongo_is_primary": client.is_primary,
         "mongo_is_mongos": client.is_mongos,
         "collections": collections,
-        "shards": shards,
+        "shards": await get_shards_info(collection_names=collection_names),
         "cache_enabled": cache_enabled,
         "status": "OK",
     }
@@ -130,8 +78,6 @@ async def root():
 async def collection_count(collection_name: str):
     collection = db.get_collection(collection_name)
     items_count = await collection.count_documents({})
-    # status = await client.admin.command('replSetGetStatus')
-    # import ipdb; ipdb.set_trace()
     return {"status": "OK", "mongo_db": DATABASE_NAME, "items_count": items_count}
 
 

@@ -1,11 +1,8 @@
-# pymongo-api
-
 ## Как запустить
 
-Запуск финальной `Mongo` инфраструктуры, `Redis` и `Python` приложения:
+Запускаем mongo инфраструктуру и приложение
 
 ```shell
-cd mongo-sharding-repl
 docker compose up -d
 ```
 
@@ -46,8 +43,3 @@ docker compose up -d
     }
   },
 ```
-
-Проверить запись в кэш редиса после ответа эндпоинта `/<collection_name>/users` можно по проброшенному
-локальному 6379 порту, сделав коннект через какой либо UI или redis-cli.
-
-- [Итоговая drawio схема](./schema.drawio)
