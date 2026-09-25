@@ -2,9 +2,10 @@
 
 ## Как запустить
 
-Запускаем mongo инфраструктуру и приложение
+Запуск финальной `Mongo` инфраструктуры, `Redis` и `Python` приложения:
 
 ```shell
+cd mongo-sharding-repl
 docker compose up -d
 ```
 
