@@ -130,9 +130,36 @@ async def root():
 async def collection_count(collection_name: str):
     collection = db.get_collection(collection_name)
     items_count = await collection.count_documents({})
-    # status = await client.admin.command('replSetGetStatus')
-    # import ipdb; ipdb.set_trace()
-    return {"status": "OK", "mongo_db": DATABASE_NAME, "items_count": items_count}
+    result = {"status": "OK", "mongo_db": DATABASE_NAME, "items_count": items_count}
+
+    try:
+        shards_list = await client.admin.command("listShards")
+    except errors.OperationFailure:
+        return result
+
+    shard_clients = {}
+    for shard in shards_list.get("shards", []):
+        shard_id = shard["_id"]
+        host = shard["host"]  # e.g. "shard1/mongo_shard_1:27018"
+        if "/" in host:
+            replset_name, hosts = host.split("/", 1)
+            uri = f"mongodb://{hosts}/?replicaSet={replset_name}"
+        else:
+            uri = f"mongodb://{host}/"
+
+        shard_clients[shard_id] = motor.motor_asyncio.AsyncIOMotorClient(uri)
+
+    if shard_clients:
+        per_shard = {}
+        for shard_name, shard_client in shard_clients.items():
+            shard_db = shard_client[DATABASE_NAME]
+            per_shard[shard_name] = await shard_db.get_collection(
+                collection_name
+            ).count_documents({})
+
+        result["shards"] = per_shard
+
+    return result
 
 
 @app.get(
