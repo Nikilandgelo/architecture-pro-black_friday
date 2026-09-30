@@ -15,13 +15,14 @@ docker compose up -d
 по GET рутовому эндпоинту `/` в поле `shards`, например:
 
 ```json
+{
   "shards": {
     "shard1": {
-      "instances_count": 4, 
+      "instances_count": 4,
       "primary": "mongo_shard_1:27018",
       "secondaries": [
-        "mongo_shard_1_1:27023", 
-        "mongo_shard_1_2:27024", 
+        "mongo_shard_1_1:27023",
+        "mongo_shard_1_2:27024",
         "mongo_shard_1_3:27025"
       ],
       "collections": {
@@ -44,7 +45,8 @@ docker compose up -d
         }
       }
     }
-  },
+  }
+}
 ```
 
 Проверить запись в кэш редиса после ответа эндпоинта `/<collection_name>/users` можно по проброшенному
