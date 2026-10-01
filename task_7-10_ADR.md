@@ -189,3 +189,9 @@ db.adminCommand({
 ```javascript
 sh.shardCollection("shop.products", { category: 1, product_id: "hashed" })
 ```
+
+
+### Задание 9. Настройка чтения с реплик и консистентность
+
+
+### Задание 10. Миграция на Cassandra: модель данных, стратегии репликации и шардирования
