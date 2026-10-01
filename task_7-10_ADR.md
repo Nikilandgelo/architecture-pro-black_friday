@@ -1,6 +1,5 @@
 ### Задание 7. Проектирование схем коллекций для шардирования данных
 
-
 ##### Сводная таблица
 | Коллекция |  Шард-ключ  | Тип шардирования | Причина |
 |:---------:|:-----------:|:---------:|---------|
@@ -112,4 +111,81 @@ db.carts.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 })
 **Команды:**
 ```javascript
 sh.shardCollection("shop.carts", { owner_key: "hashed" })
+```
+
+
+### Задание 8. Выявление и устранение «горячих» шардов
+##### Набор метрик, чтобы отслеживать состояние шардов:
+- Информация по количеству документов, среднему размеру документа и процент шарда от общего объема коллекции:
+```javascript
+db.products.getShardDistribution()
+```
+- Количество чанков на каждом шарде:
+```javascript
+db.getSiblingDB("config").chunks.aggregate([
+  { $match: { ns: "shop.products" } },
+  { $group: { _id: "$shard", count: { $sum: 1 } } }
+])
+```
+- Существование `Jumbo` чанков (чанков, которые балансировщик физически не может разбить/перенести):
+```javascript
+db.getSiblingDB("config").chunks.find({ ns: "shop.products", jumbo: true })
+```
+- Количество операций `insert/query/update/delete` в секунду по шардам в реальном времени:
+```shell
+mongostat --host shard1/mongo_shard_1:27018,mongo_shard_1_1:27023,...
+```
+- Нагрузка ресурсов хоста: CPU, memory, disk IOPS каждой shard-ноды;
+- Уровень блокировок и очередей:
+```javascript
+db.currentOp({ "waitingForLock": true })
+db.serverStatus().globalLock
+db.serverStatus().wiredTiger.cache
+```
+- Наличие репликационного лага у реплик:
+```javascript
+rs.printSecondaryReplicationInfo()
+```
+##### Механизмы автоматического перераспределения данных и меры устранения дисбаланса:
+- `Zone Sharding` - явное разведение "горячих" диапазонов по отдельным шардам, по большему числу нод, чем холодные категории
+(`Zone Sharding` работает только если поле, по которому задается диапазон, входит в состав текущего шард-ключа коллекции):
+```javascript
+sh.addShardToZone("shard1", "electronics-zone")
+sh.addShardToZone("shard2", "electronics-zone")
+
+sh.updateZoneKeyRange(
+  "shop.products",
+  { category: "Электроника", product_id: MinKey },
+  { category: "Электроника", product_id: MaxKey },
+  "electronics-zone"
+)
+```
+- Включение балансировщик шардированных коллекций (в случае если он не активен):
+```javascript
+sh.getBalancerState()  // текущее состояние балансировщика
+sh.setBalancerState(true)  // включение балансировщика
+
+// установка работы балансировщика в определенное время
+db.getSiblingDB("config").settings.updateOne(
+  { _id: "balancer" },
+  { $set: { activeWindow: { start: "02:00", stop: "06:00" } } },
+  { upsert: true }
+)
+
+sh.balancerCollectionStatus("shop.products")  // текущий статус миграции конкретной коллекции
+```
+- Уменьшение размера чанков (`MongoDB 6.0+`, для более старых версий используется глобальная
+настройка через `config.settings` с `_id: "chunksize"`):
+```javascript
+db.adminCommand({
+  configureCollectionBalancing: "shop.products",
+  chunkSize: 32
+})
+```
+- Составной шард-ключ с категорией как ведущим диапазонным полем и хэшированным
+вторым полем для равномерного распределения товаров **внутри** каждой категории
+по разным шардам/чанкам за счет хэш-суффикса, устраняя ситуацию, когда вся популярная
+категория целиком оседает на одном шарде:
+```javascript
+sh.shardCollection("shop.products", { category: 1, product_id: "hashed" })
 ```
