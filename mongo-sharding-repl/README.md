@@ -1,11 +1,8 @@
-# pymongo-api
-
 ## Как запустить
 
-Запуск финальной `Mongo` инфраструктуры, `Redis` и `Python` приложения:
+Запускаем mongo инфраструктуру и приложение
 
 ```shell
-cd mongo-sharding-repl
 docker compose up -d
 ```
 
@@ -15,14 +12,13 @@ docker compose up -d
 по GET рутовому эндпоинту `/` в поле `shards`, например:
 
 ```json
-{
   "shards": {
     "shard1": {
-      "instances_count": 4,
+      "instances_count": 4, 
       "primary": "mongo_shard_1:27018",
       "secondaries": [
-        "mongo_shard_1_1:27023",
-        "mongo_shard_1_2:27024",
+        "mongo_shard_1_1:27023", 
+        "mongo_shard_1_2:27024", 
         "mongo_shard_1_3:27025"
       ],
       "collections": {
@@ -45,12 +41,5 @@ docker compose up -d
         }
       }
     }
-  }
-}
+  },
 ```
-
-Проверить запись в кэш редиса после ответа эндпоинта `/<collection_name>/users` можно по проброшенному
-локальному 6379 порту, сделав коннект через какой либо UI или redis-cli.
-
-- [Итоговая drawio схема](./schema.drawio)
-- [Архитектурный документ заданий 7-10](./task_7-10_ADR.md)

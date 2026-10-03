@@ -1,0 +1,236 @@
+name: mongo-sharding
+
+x-healthcheck-params: &healthcheck-params
+  interval: 5s
+  retries: 3
+  timeout: 3s
+
+x-mongod-config-depends-on: &mongod-config-depends-on
+  mongo_config_1:
+    condition: service_healthy
+  mongo_config_2:
+    condition: service_healthy
+  mongo_config_3:
+    condition: service_healthy
+  mongo_shard_1:
+    condition: service_healthy
+  mongo_shard_2:
+    condition: service_healthy
+
+x-full-mongo-depends-on: &full-mongo-depends-on
+  <<: *mongod-config-depends-on
+  mongo_router_1:
+    condition: service_healthy
+  mongo_router_2:
+    condition: service_healthy
+
+x-base-mongo: &base-mongo
+  image: dh-mirror.gitverse.ru/mongo:latest
+  restart: unless-stopped
+
+x-base-mongo-shard: &base-mongo-shard
+  <<: *base-mongo
+  command: mongod --shardsvr --config /etc/mongod.conf
+
+x-base-mongo-config: &base-mongo-config
+  <<: *base-mongo
+  command: mongod --configsvr --config /etc/mongod.conf
+
+x-base-mongo-router: &base-mongo-router
+  <<: *base-mongo
+  depends_on:
+    mongo_init_replicasets:
+      condition: service_completed_successfully
+  command: mongos --configdb configSrv/mongo_config_1:27020,mongo_config_2:27021,mongo_config_3:27022 --config /etc/mongod.conf
+
+
+
+
+configs:
+  mongo_shard_1_conf:
+    content: |
+      net:
+        port: 27018
+        bindIpAll: true
+      replication:
+        replSetName: shard1
+  mongo_shard_2_conf:
+    content: |
+      net:
+        port: 27019
+        bindIpAll: true
+      replication:
+        replSetName: shard2
+  mongo_config_1_conf:
+    content: |
+      net:
+        port: 27020
+        bindIpAll: true
+      replication:
+        replSetName: configSrv
+  mongo_config_2_conf:
+    content: |
+      net:
+        port: 27021
+        bindIpAll: true
+      replication:
+        replSetName: configSrv
+  mongo_config_3_conf:
+    content: |
+      net:
+        port: 27022
+        bindIpAll: true
+      replication:
+        replSetName: configSrv
+  mongo_router_1_conf:
+    content: |
+      net:
+        port: 27017
+        bindIpAll: true
+  mongo_router_2_conf:
+    content: |
+      net:
+        port: 27017
+        bindIpAll: true
+
+
+
+
+
+services:
+  mongo_config_1:
+    container_name: mongo_config_1
+    <<: *base-mongo-config
+    configs:
+      - source: mongo_config_1_conf
+        target: /etc/mongod.conf
+    volumes:
+      - mongo_config_1_data_container:/data/db
+      - mongo_config_1_config_data:/data/configdb
+    healthcheck:
+      test: [ "CMD", "mongosh", "--port", "27020", "--eval", "db.adminCommand('ping')" ]
+      <<: *healthcheck-params
+
+  mongo_config_2:
+    container_name: mongo_config_2
+    <<: *base-mongo-config
+    configs:
+      - source: mongo_config_2_conf
+        target: /etc/mongod.conf
+    volumes:
+      - mongo_config_2_data_container:/data/db
+      - mongo_config_2_config_data:/data/configdb
+    healthcheck:
+      test: [ "CMD", "mongosh", "--port", "27021", "--eval", "db.adminCommand('ping')" ]
+      <<: *healthcheck-params
+
+  mongo_config_3:
+    container_name: mongo_config_3
+    <<: *base-mongo-config
+    configs:
+      - source: mongo_config_3_conf
+        target: /etc/mongod.conf
+    volumes:
+      - mongo_config_3_data_container:/data/db
+      - mongo_config_3_config_data:/data/configdb
+    healthcheck:
+      test: [ "CMD", "mongosh", "--port", "27022", "--eval", "db.adminCommand('ping')" ]
+      <<: *healthcheck-params
+
+  mongo_shard_1:
+    container_name: mongo_shard_1
+    <<: *base-mongo-shard
+    configs:
+      - source: mongo_shard_1_conf
+        target: /etc/mongod.conf
+    volumes:
+      - mongo_shard_1_data_container:/data/db
+      - mongo_shard_1_config_data:/data/configdb
+    healthcheck:
+      test: [ "CMD", "mongosh", "--port", "27018", "--eval", "db.adminCommand('ping')" ]
+      <<: *healthcheck-params
+
+  mongo_shard_2:
+    container_name: mongo_shard_2
+    <<: *base-mongo-shard
+    configs:
+      - source: mongo_shard_2_conf
+        target: /etc/mongod.conf
+    volumes:
+      - mongo_shard_2_data_container:/data/db
+      - mongo_shard_2_config_data:/data/configdb
+    healthcheck:
+      test: [ "CMD", "mongosh", "--port", "27019", "--eval", "db.adminCommand('ping')" ]
+      <<: *healthcheck-params
+
+  mongo_init_replicasets:
+    container_name: mongo_init_replicasets
+    <<: *base-mongo
+    restart: "no"
+    depends_on:
+      <<: *mongod-config-depends-on
+    command: sh /opt/mongo/mongo-entrypoint.sh
+    volumes:
+      - ./mongo-entrypoint.sh:/opt/mongo/mongo-entrypoint.sh
+
+
+
+
+  mongo_router_1:
+    container_name: mongo_router_1
+    <<: *base-mongo-router
+    configs:
+      - source: mongo_router_1_conf
+        target: /etc/mongod.conf
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      <<: *healthcheck-params
+
+  mongo_router_2:
+    container_name: mongo_router_2
+    <<: *base-mongo-router
+    configs:
+      - source: mongo_router_2_conf
+        target: /etc/mongod.conf
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      <<: *healthcheck-params
+
+  mongo_init_shards:
+    container_name: mongo_init_shards
+    <<: *base-mongo
+    restart: "no"
+    depends_on:
+      <<: *full-mongo-depends-on
+    command: sh /opt/mongo/mongo-shards-entrypoint.sh
+    volumes:
+      - ./mongo-shards-entrypoint.sh:/opt/mongo/mongo-shards-entrypoint.sh
+
+
+
+
+  pymongo_api:
+    container_name: pymongo_api
+    build:
+      context: ../api_app
+    depends_on:
+      mongo_init_shards:
+        condition: service_completed_successfully
+    ports:
+      - ${APP_PORT:-8080}:8080
+    environment:
+      MONGODB_URL: "mongodb://mongo_router_1,mongo_router_2"
+      MONGODB_DATABASE_NAME: "somedb"
+
+volumes:
+  mongo_shard_1_data_container:
+  mongo_shard_1_config_data:
+  mongo_shard_2_data_container:
+  mongo_shard_2_config_data:
+
+  mongo_config_1_data_container:
+  mongo_config_1_config_data:
+  mongo_config_2_data_container:
+  mongo_config_2_config_data:
+  mongo_config_3_data_container:
+  mongo_config_3_config_data:
